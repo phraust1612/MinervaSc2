@@ -17,6 +17,8 @@ class DQN:
         self.session = session
         self.input_size = input_size
         self.output_size = output_size
+        #self.screen_size = screen_size
+        #self.minimap_size = minimap_size
         self.net_name = name
 
         self._build_network()
@@ -28,13 +30,14 @@ class DQN:
             l_rate (float, optional): Learning rate
         """
         with tf.variable_scope(self.net_name):
+            self.session.run(tf.global_variables_initializer())
             self._X = tf.placeholder(tf.float32, [None, self.input_size], name="input_x")
 
-            self._W1 = tf.Variable(tf.random_normal([self.input_size, h_size], stddev=0.1), name="W1")
-            L1 = tf.nn.tanh(tf.matmul(self._X, self._W1))
+            W1 = tf.Variable(tf.random_normal([self.input_size, h_size], stddev=0.1), name="W1")
+            L1 = tf.nn.tanh(tf.matmul(self._X, W1))
 
-            self._W2 = tf.Variable(tf.random_normal([h_size, self.output_size], stddev=0.1), name="W2")
-            self._Qpred = tf.matmul(L1, self._W2)
+            W2 = tf.Variable(tf.random_normal([h_size, self.output_size], stddev=0.1), name="W2")
+            self._Qpred = tf.matmul(L1, W2)
 
             self._Y = tf.placeholder(tf.float32, shape=[None, self.output_size])
             self._loss = tf.losses.mean_squared_error(self._Y, self._Qpred)

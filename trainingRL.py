@@ -13,6 +13,9 @@ FLAGS = flags.FLAGS
 
 input_size = minerva_agent.STATE_SIZE # no of possible states
 output_size = 584 # no of possible actions
+screen_size = 64*64 # no of possible pixel coordinates
+minimap_size = 64*64
+
 learning_rate = 0.1
 discount = 0.99
 num_episodes = 100
@@ -24,7 +27,9 @@ visualize = False
 myrace = "P"
 botrace = "T"
 
-def batch_train(mainDQN: dqn.DQN, targetDQN: dqn.DQN, train_batch: list) -> float:
+stored_buffer = deque(maxlen=max_buffer_size)
+
+def batch_train(env, DQNlist, train_batch: list) -> float:
     """Trains `mainDQN` with target Q values given by `targetDQN`
     Args:
         mainDQN (dqn.DQN): Main DQN that will be trained
@@ -35,18 +40,56 @@ def batch_train(mainDQN: dqn.DQN, targetDQN: dqn.DQN, train_batch: list) -> floa
     Returns:
         float: After updating `mainDQN`, it returns a `loss`
     """
+    mainDQN = DQNlist[0]
+    targetDQN = DQNlist[1]
+    mainScreenDQN = DQNlist[2]
+    targetScreenDQN = DQNlist[3]
+    mainMinimapDQN = DQNlist[4]
+    targetMinimapDQN = DQNlist[5]
+
     states = np.vstack([x[0] for x in train_batch])
-    actions = np.array([x[1] for x in train_batch])
-    rewards = np.array([x[2] for x in train_batch])
-    next_states = np.vstack([x[3] for x in train_batch])
-    done = np.array([x[4] for x in train_batch])
+    actions_id = np.array([x[1] for x in train_batch])
+    rewards = np.array([x[3] for x in train_batch])
+    next_states = np.vstack([x[4] for x in train_batch])
+    done = np.array([x[5] for x in train_batch])
+
+    actions_arg = []
+    for x in train_batch:
+        action_id = x[1]
+        arg_index = 0
+        appended = 0
+        for arg in env.action_spec().functions[action_id].args:
+            if arg.id == 0 or arg.id==1:
+                actions_arg.append(minerva_agent.coordinateToInt(x[2][arg_index]))
+                appended = 1
+                break
+            arg_index += 1
+        if not appended:
+            actions_arg.append(-1)
 
     X = states
 
-    Q_target = rewards + DISCOUNT_RATE * np.max(targetDQN.predict(next_states), axis=1) * ~done
+    Q_target = rewards + discount * np.max(targetDQN.predict(next_states), axis=1) * ~done
+    screenQ_target = rewards + discount * np.max(targetScreenDQN.predict(next_states), axis=1) * ~done
+    minimapQ_target = rewards + discount * np.max(targetMinimapDQN.predict(next_states), axis=1) * ~done
 
     y = mainDQN.predict(states)
-    y[np.arange(len(X)), actions] = Q_target
+    y[np.arange(len(X)), actions_id] = Q_target
+
+    #print("Q_target:",Q_target)
+    #print("screenQ_target:",screenQ_target)
+    #print("minimapQ_target:",minimapQ_target)
+    #print("np.arange(len(X)):",np.arange(len(X)), "len:",len(np.arange(len(X))))
+    #print("actions_id:",actions_id, "len:",len(actions_id))
+    #print("actions_args:",actions_arg, "len:", len(actions_arg))
+    yscreen = mainScreenDQN.predict(states)
+    yminimap = mainMinimapDQN.predict(states)
+    for i in range(len(X)):
+        if actions_arg[i] != -1:
+            yscreen[i, actions_arg[i]] = screenQ_target[i]
+            yminimap[i, actions_arg[i]] = minimapQ_target[i]
+    mainScreenDQN.update(X, yscreen)
+    mainMinimapDQN.update(X, yminimap)
 
     # Train our network using target and predicted Q values on each episode
     return mainDQN.update(X, y)
@@ -74,7 +117,17 @@ def get_copy_var_ops(*, dest_scope_name: str, src_scope_name: str) -> List[tf.Op
     return op_holder
 
 # returns pysc2.env.environment.TimeStep after end of the game
-def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
+def run_loop(agents, env, sess, e, DQNlist, copy_list, max_frames=0):
+    mainDQN = DQNlist[0]
+    targetDQN = DQNlist[1]
+    mainScreenDQN = DQNlist[2]
+    targetScreenDQN = DQNlist[3]
+    mainMinimapDQN = DQNlist[4]
+    targetMinimapDQN = DQNlist[5]
+    copy_ops = copy_list[0]
+    copy_ops_screen = copy_list[1]
+    copy_ops_minimap = copy_list[2]
+
     total_frames = 0
     start_time = time.time()
 
@@ -98,7 +151,7 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
                        for agent, timestep in zip(agents, timesteps)]
             else:
                 # choose an action by 'exploit'
-                actions = [agent.step(timestep, mainDQN.predict(state))
+                actions = [agent.step(timestep, 1)
                        for agent, timestep in zip(agents, timesteps)]
 
             if max_frames and total_frames >= max_frames:
@@ -112,14 +165,16 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
             if done:
                 break
 
-            stored_buffer.append( (state, actions[0], reward, next_state, done) )
+            stored_buffer.append( (state, actions[0].function, actions[0].arguments, reward, next_state, done) )
 
             if len(stored_buffer) > batch_size:
                 minibatch = random.sample(stored_buffer, batch_size)
-                loss, _ = batch_train(mainDQN, targetDQN, minibatch)
+                loss, _ = batch_train(env, DQNlist, minibatch)
 
             if step_count % update_frequency == 0:
                 sess.run(copy_ops)
+                sess.run(copy_ops_screen)
+                sess.run(copy_ops_minimap)
 
             state = next_state
             step_count += 1
@@ -132,20 +187,27 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
             elapsed_time, total_frames, total_frames / elapsed_time))
     return timesteps
 
-XT = tf.zeros([1])
-
 def _main(unused_argv):
-    store_buffer = deque(maxlen=max_buffer_size)
-
+    saver = tf.train.Saver()
     init = tf.global_variables_initializer()
-    #init = tf.initialize_all_variables()
     with tf.Session() as sess:
         mainDQN = dqn.DQN(sess, input_size, output_size, name="main")
         targetDQN = dqn.DQN(sess, input_size, output_size, name="target")
+        mainScreenDQN = dqn.DQN(sess, input_size, screen_size, name="mainScreen")
+        targetScreenDQN = dqn.DQN(sess, input_size, screen_size, name="targetScreen")
+        mainMinimapDQN = dqn.DQN(sess, input_size, minimap_size, name="mainMinimap")
+        targetMinimapDQN = dqn.DQN(sess, input_size, minimap_size, name="targetMinimap")
         sess.run(init)
 
         copy_ops = get_copy_var_ops(dest_scope_name="target", src_scope_name="main")
-        #sess.run(copy_ops)
+        copy_ops_screen = get_copy_var_ops(dest_scope_name="targetScreen", src_scope_name="mainScreen")
+        copy_ops_minimap = get_copy_var_ops(dest_scope_name="targetMinimap", src_scope_name="mainMinimap")
+        sess.run(copy_ops)
+        sess.run(copy_ops_screen)
+        sess.run(copy_ops_minimap)
+
+        DQNlist = [mainDQN, targetDQN, mainScreenDQN, targetScreenDQN, mainMinimapDQN, targetScreenDQN]
+        copy_list = [copy_ops, copy_ops_screen, copy_ops_minimap]
 
         for episode in range(num_episodes):
             e = 1.0 / ((episode / 50) + 10) # decaying exploration rate
@@ -155,11 +217,14 @@ def _main(unused_argv):
                     bot_race=botrace,
                     difficulty="1",
                     visualize=visualize) as env:
-                agent = minerva_agent.MinervaAgent()
-                run_result = run_loop([agent], env, sess, e, mainDQN, targetDQN, copy_ops) # no max_frame set : infinite game time
+                agent = minerva_agent.MinervaAgent(DQNlist)
+                run_result = run_loop([agent], env, sess, e, DQNlist, copy_list)
+                reward = run_result[0].reward
+                if reward > 0:
+                    env.save_replay("victory/")
 
-            reward = run_result[0].reward
             print("%d'th game result :"%(episode+1),reward)
+            saver.save(sess, "sessionSave")
 
 argv = FLAGS(sys.argv)
 sys.exit(_main(argv))

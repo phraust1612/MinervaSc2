@@ -79,8 +79,8 @@ obs.observation['screen'] : (13, 84, 84)
 ======================================================
 """
 
-STATE_SIZE = 23
 # observation to state number
+"""
 def State(obs):
     ans = np.zeros([1, STATE_SIZE])
     ans[0][0] = obs['player'][1]
@@ -111,6 +111,7 @@ def State(obs):
             ans[0][21] += obs['screen'][11][x][y]
             ans[0][22] += obs['screen'][12][x][y]
     return ans
+"""
 
 def intToCoordinate(num, size=64):
     if size!=64:
@@ -125,14 +126,9 @@ def coordinateToInt(coor, size=64):
 # if agent did an action - move_camera previously,
 # it must do a selecting action (id=2~9) for the next.
 class MinervaAgent(base_agent.BaseAgent):
-    def __init__(self, DQNlist):
+    def __init__(self, mainDQN=None):
         super(MinervaAgent, self).__init__()
-        self.mainDQN = DQNlist[0]
-        self.targetDQN = DQNlist[1]
-        self.mainScreenDQN = DQNlist[2]
-        self.targetScreenDQN = DQNlist[3]
-        self.mainMinimapDQN = DQNlist[4]
-        self.targetMinimapDQN = DQNlist[5]
+        self.mainDQN = mainDQN
 
     def setup(self, obs_spec, action_spec):
         super(MinervaAgent, self).setup(obs_spec, action_spec)
@@ -151,7 +147,7 @@ class MinervaAgent(base_agent.BaseAgent):
 
         # otherwise choose an action for exploit
         # Qs[0] : ndarray([584]) -> Qs[0][i] score function of action whose id=i
-        Qs = self.mainDQN.predict(State(obs.observation))
+        Qs = self.mainDQN.predict([[obs.observation]])
         for i in range(len(Qs[0])):
             if i not in obs.observation["available_actions"]:
                 Qs[0][i] = -100
@@ -162,24 +158,19 @@ class MinervaAgent(base_agent.BaseAgent):
 
         ############# find minimap/screen coordinate etc. #################
 
-        screenQs = self.mainScreenDQN.predict(State(obs.observation))
-        minimapQs = self.mainMinimapDQN.predict(State(obs.observation))
+        screenQs = self.mainDQN.predictSpatial([[obs.observation]])
         screenInt = np.argmax(screenQs[0])
-        minimapInt = np.argmax(minimapQs[0])
 
         ans_arg = []
         for arg in self.action_spec.functions[ans_id].args:
             # point screen
-            if arg.id == 0 or arg.id==2:
+            if arg.id == 0 or arg.id==1:
                 ans_arg.append(intToCoordinate(screenInt, arg.sizes[0]))
-            # point minimap
-            elif arg.id == 1:
-                ans_arg.append(intToCoordinate(minimapInt, arg.sizes[0]))
             # selct rect's right bottom edge according to left upper edge coord
             elif arg.id == 2:
                 tmp = ans_arg[-1]
                 for i in range(2):
-                    tmp[i] += np.random(5,10)
+                    tmp[i] += np.random.randint(5,10)
                     if tmp[i] >= arg.sizes[0]:
                         tmp[i] = arg.sizes[0] - 1
                 ans_arg.append(tmp)

@@ -79,40 +79,6 @@ obs.observation['screen'] : (13, 84, 84)
 ======================================================
 """
 
-# observation to state number
-"""
-def State(obs):
-    ans = np.zeros([1, STATE_SIZE])
-    ans[0][0] = obs['player'][1]
-    ans[0][1] = obs['player'][2]
-    ans[0][2] = obs['player'][3]
-    ans[0][3] = obs['player'][4]
-    ans[0][4] = obs['player'][5]
-    ans[0][5] = obs['player'][6]
-    ans[0][6] = obs['player'][7]
-    ans[0][7] = obs['player'][8]
-    ans[0][8] = obs['player'][8]
-    ans[0][9] = obs['player'][10]
-    for x in range(obs['minimap'][1].shape[0]):
-        for y in range(obs['minimap'][1].shape[1]):
-            ans[0][10] += obs['minimap'][1][x][y]
-            ans[0][11] += obs['minimap'][3][x][y]
-            ans[0][12] += obs['minimap'][5][x][y]
-    for x in range(obs['screen'][0].shape[0]):
-        for y in range(obs['screen'][0].shape[1]):
-            ans[0][13] += obs['screen'][0][x][y]
-            ans[0][14] += obs['screen'][1][x][y]
-            ans[0][15] += obs['screen'][5][x][y]
-            ans[0][16] += obs['screen'][6][x][y]
-            ans[0][17] += obs['screen'][7][x][y]
-            ans[0][18] += obs['screen'][8][x][y]
-            ans[0][19] += obs['screen'][9][x][y]
-            ans[0][20] += obs['screen'][10][x][y]
-            ans[0][21] += obs['screen'][11][x][y]
-            ans[0][22] += obs['screen'][12][x][y]
-    return ans
-"""
-
 def intToCoordinate(num, size=64):
     if size!=64:
         num = num * size * size // 4096
@@ -120,11 +86,6 @@ def intToCoordinate(num, size=64):
     x = num - size * y
     return [x, y]
 
-def coordinateToInt(coor, size=64):
-    return coor[0] + size*coor[1]
-
-# if agent did an action - move_camera previously,
-# it must do a selecting action (id=2~9) for the next.
 class MinervaAgent(base_agent.BaseAgent):
     def __init__(self, mainDQN=None):
         super(MinervaAgent, self).__init__()
@@ -136,62 +97,40 @@ class MinervaAgent(base_agent.BaseAgent):
     def step(self, obs, exploit):
         super(MinervaAgent, self).step(obs)
 
-        # if Qs == 0, choose an action for exploration
+        # if exploit == 0, choose an action for exploration
         if exploit == 0:
-            function_id = np.random.choice(obs.observation["available_actions"])
-            args = [[np.random.randint(0, size) for size in arg.sizes]
-                for arg in self.action_spec.functions[function_id].args]
-            return actions.FunctionCall(function_id, args)
+            ans_id = np.random.choice(obs.observation["available_actions"])
 
         ################## find action id ######################
 
         # otherwise choose an action for exploit
         # Qs[0] : ndarray([584]) -> Qs[0][i] score function of action whose id=i
-        Qs = self.mainDQN.predict([[obs.observation]])
-        for i in range(len(Qs[0])):
-            if i not in obs.observation["available_actions"]:
-                Qs[0][i] = -100
+        else:
+            Qs = self.mainDQN.predict([[obs.observation]])
+            for i in range(len(Qs[0])):
+                if i not in obs.observation["available_actions"]:
+                    Qs[0][i] = -100
 
-        ans_id = np.argmax(Qs[0])
-        if Qs[0][ans_id] <= -100:
-            ans_id = 0
+            ans_id = np.argmax(Qs[0])
+            if Qs[0][ans_id] <= -100:
+                ans_id = 0
 
         ############# find minimap/screen coordinate etc. #################
 
-        screenQs = self.mainDQN.predictSpatial([[obs.observation]])
-        screenInt = np.argmax(screenQs[0])
+        spatialQs = self.mainDQN.predictSpatial([[obs.observation]])
+        spatialInt = []
+        for i in range(13):
+            spatialInt.append(np.argmax(spatialQs[i][0]))
 
         ans_arg = []
         for arg in self.action_spec.functions[ans_id].args:
-            # point screen
-            if arg.id == 0 or arg.id==1:
-                ans_arg.append(intToCoordinate(screenInt, arg.sizes[0]))
-            # selct rect's right bottom edge according to left upper edge coord
-            elif arg.id == 2:
-                tmp = ans_arg[-1]
-                for i in range(2):
-                    tmp[i] += np.random.randint(5,10)
-                    if tmp[i] >= arg.sizes[0]:
-                        tmp[i] = arg.sizes[0] - 1
-                ans_arg.append(tmp)
-
-            # select_add, only replace
-            elif arg.id == 7:
-                ans_arg.append([1])
-            # i don't know group act id
-            #elif arg.id == 4:
-            #    ans_arg.append([np.random(0,5)])
+            if arg.id in range(3):
+                ans_arg.append(intToCoordinate(spatialInt[arg.id], arg.sizes[0]))
             else:
-                ans_arg.append([0])
-        """
-        print(ans_id, " : ", ans_arg)
-        for arg in self.action_spec.functions[ans_id].args:
-            print(arg.id, " : ", arg.name, " : ", arg.sizes, "arg.size type :",type(arg.sizes))
-            sss = 1
-            for si in arg.sizes:
-                sss *= si
-            print("    new size :",sss)
+                ans_arg.append([spatialInt[arg.id]])
 
+        print("step :", self.steps, "exploit :",exploit,"action id :", ans_id, "arg :",ans_arg)
+        """
 173   Attributes:
 174     0  screen: A point on the screen.
 175     1  minimap: A point on the minimap.
@@ -207,6 +146,5 @@ class MinervaAgent(base_agent.BaseAgent):
 185     10 select_worker: What to do when selecting a worker.                      size<4
 186     11 build_queue_id: Which build queue index to target.                      size<10
 187     12 unload_id: Which unit to target in a transport/nydus/command center.    size<500
-
         """
         return actions.FunctionCall(ans_id, ans_arg)

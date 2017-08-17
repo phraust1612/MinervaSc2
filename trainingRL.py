@@ -15,10 +15,9 @@ output_size = 584 # no of possible actions
 screen_size = 64 # no of possible pixel coordinates
 minimap_size = 64
 
-learning_rate = 0.1
+learning_rate = 0.001
 discount = 0.99
-num_episodes = 100
-batch_size = 64
+batch_size = 16
 max_buffer_size = 50000
 update_frequency = 16
 
@@ -27,6 +26,9 @@ myrace = "P"
 botrace = "T"
 
 stored_buffer = deque(maxlen=max_buffer_size)
+
+def coordinateToInt(coor, size=64):
+    return coor[0] + size*coor[1]
 
 def batch_train(env, mainDQN, targetDQN, train_batch: list) -> float:
     """Trains `mainDQN` with target Q values given by `targetDQN`
@@ -45,33 +47,41 @@ def batch_train(env, mainDQN, targetDQN, train_batch: list) -> float:
     next_states = np.vstack([x[4] for x in train_batch])
     done = np.array([x[5] for x in train_batch])
 
-    actions_arg = []
+    # actions_arg[i] : arguments whose id=i
+    actions_arg = np.ones([13,batch_size],dtype=np.int32)
+    actions_arg *= -1
+
+    batch_index = 0
     for x in train_batch:
         action_id = x[1]
         arg_index = 0
-        appended = 0
+
         for arg in env.action_spec().functions[action_id].args:
-            if arg.id == 0 or arg.id==1:
-                actions_arg.append(minerva_agent.coordinateToInt(x[2][arg_index]))
-                appended = 1
-                break
+            if arg.id in range(3):
+                actions_arg[arg.id][batch_index] = coordinateToInt(x[2][arg_index])
+            else:
+                actions_arg[arg.id][batch_index] = (int) (x[2][arg_index][0])
             arg_index += 1
-        if not appended:
-            actions_arg.append(-1)
+        batch_index += 1
 
     X = states
 
     Q_target = rewards + discount * np.max(targetDQN.predict(next_states), axis=1) * ~done
-    spatial_Q_target = rewards + discount * np.max(targetDQN.predictSpatial(next_states), axis=1) *~done
+    spatial_Q_target = []
+    spatial_predict = targetDQN.predictSpatial(next_states)
+    for i in range(13):
+        spatial_Q_target.append( rewards + discount * np.max(spatial_predict[i], axis=1) *~done )
 
     # y shape : [batch_size, output_size]
     y = mainDQN.predict(states)
     y[np.arange(len(X)), actions_id] = Q_target
 
+    # ySpatial shape : [13, batch_size, arg_size(id)]
     ySpatial = mainDQN.predictSpatial(states)
-    for i in range(len(X)):
-        if actions_arg[i] >= 0:
-            ySpatial[i, actions_arg[i]] = spatial_Q_target[i]
+    for j in range(13):
+        for i in range(len(X)):
+            if actions_arg[j][i] >= 0:
+                ySpatial[j][i][actions_arg[j][i]] = spatial_Q_target[j][i]
 
     # Train our network using target and predicted Q values on each episode
     return mainDQN.update(X, y, ySpatial)
@@ -160,18 +170,26 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
     return timesteps
 
 def _main(unused_argv):
-    #saver = tf.train.Saver()
+    if len(unused_argv)>1:
+        start_epi = unused_argv[1]
+    else:
+        start_epi = 0
+    if len(unused_argv)>2:
+        num_episodes = unused_argv[2]
+    else:
+        num_episodes = 100
+
     init = tf.global_variables_initializer()
     with tf.Session() as sess:
-        mainDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, name="main")
-        targetDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, name="target")
+        mainDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="main")
+        targetDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="target")
         sess.run(init)
 
         copy_ops = get_copy_var_ops(dest_scope_name="target", src_scope_name="main")
         sess.run(copy_ops)
 
-        for episode in range(num_episodes):
-            e = 1.0 / ((episode / 50) + 10) # decaying exploration rate
+        for episode in range(start_epi, num_episodes):
+            e = 1.0 / ((episode / 50) + 2.0) # decaying exploration rate
             with sc2_env.SC2Env(
                     "Odyssey",
                     agent_race=myrace,
@@ -183,9 +201,11 @@ def _main(unused_argv):
                 reward = run_result[0].reward
                 if reward > 0:
                     env.save_replay("victory/")
+                else:
+                    env.save_replay("defeat/")
+                env.close()
 
-            print("%d'th game result :"%(episode+1),reward)
-            #saver.save(sess, "sessionSave")
+            print("%d'th game result :"%episode,reward)
 
 argv = FLAGS(sys.argv)
 sys.exit(_main(argv))

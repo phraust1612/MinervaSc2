@@ -27,6 +27,8 @@ visualize = False
 myrace = "P"
 botrace = "T"
 
+stored_buffer = deque(maxlen=max_buffer_size)
+
 def coordinateToInt(coor, size=64):
     return coor[0] + size*coor[1]
 
@@ -111,7 +113,6 @@ def get_copy_var_ops(*, dest_scope_name: str, src_scope_name: str) -> List[tf.Op
 # returns pysc2.env.environment.TimeStep after end of the game
 def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
     total_frames = 0
-    stored_buffer = deque(maxlen=max_buffer_size)
     start_time = time.time()
 
     action_spec = env.action_spec()
@@ -179,17 +180,15 @@ def _main(unused_argv):
         num_episodes = 100
 
     parent_proc = psutil.Process()
+    print("parent:",parent_proc, "percent:", parent_proc.memory_percent())
+    children = parent_proc.children(recursive=True)
+    print("children:",children)
     init = tf.global_variables_initializer()
     with tf.Session() as sess:
-        mainDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="main")
-        targetDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="target")
         sess.run(init)
 
-        copy_ops = get_copy_var_ops(dest_scope_name="target", src_scope_name="main")
-        sess.run(copy_ops)
-        print("memory before starting the iteration : %s (kb)"%(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
-
         for episode in range(start_epi, num_episodes):
+            print("memory before start: %s (kb)"%resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
             e = 1.0 / ((episode / 50) + 2.0) # decaying exploration rate
             with sc2_env.SC2Env(
                     "Odyssey",
@@ -197,23 +196,24 @@ def _main(unused_argv):
                     bot_race=botrace,
                     difficulty="1",
                     visualize=visualize) as env:
+                #agent = minerva_agent.MinervaAgent(mainDQN)
 
-                agent = minerva_agent.MinervaAgent(mainDQN)
-                run_result = run_loop([agent], env, sess, e, mainDQN, targetDQN, copy_ops, 5000)
-                agent.close()
-                reward = run_result[0].reward
-                if reward > 0:
-                    env.save_replay("victory/")
-                #else:
-                #    env.save_replay("defeat/")
+                children = parent_proc.children(recursive=True)
+                print("parent per:", parent_proc.memory_percent(),"child percent:", children[0].memory_percent())
+                print("memory before exit: %s (kb)"%resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
-            children = parent_proc.children(recursive=True)
+            print("children:",children)
             for child in children:
-                print("remaining child proc :", child)
-            print("memory after exit %d'th sc2env : %s (kb)"%(episode, resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
-
-            mainDQN.saveWeight()
-            print("networks were saved, %d'th game result :"%episode,reward)
+                if child.is_running():
+                    print("child :",child, child.status())
+                else:
+                    print("child dead :",child)
+            """
+            children = parent_proc.children(recursive=True)
+            print("remaining children:",children)
+            for child in children:
+                print("child pid {}".format(child.pid))
+            """
 
 argv = FLAGS(sys.argv)
 sys.exit(_main(argv))

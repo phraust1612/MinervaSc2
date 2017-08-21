@@ -91,6 +91,11 @@ class MinervaAgent(base_agent.BaseAgent):
         super(MinervaAgent, self).__init__()
         self.mainDQN = mainDQN
 
+    def close(self):
+        self.mainDQN = None
+        self.obs_spec = None
+        self.action_spec = None
+
     def setup(self, obs_spec, action_spec):
         super(MinervaAgent, self).setup(obs_spec, action_spec)
 

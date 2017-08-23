@@ -170,11 +170,11 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
 
 def _main(unused_argv):
     if len(unused_argv)>1:
-        start_epi = unused_argv[1]
+        start_epi = (int)(unused_argv[1])
     else:
         start_epi = 0
     if len(unused_argv)>2:
-        num_episodes = unused_argv[2]
+        num_episodes = (int)(unused_argv[2])
     else:
         num_episodes = 100
 

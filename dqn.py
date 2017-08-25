@@ -162,7 +162,7 @@ class DQN:
             _loss += tf.losses.mean_squared_error(self._Y_nonspatial12, self._nonspatial12_Qpred)
             self._loss = _loss
 
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.l_rate)
+            optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.l_rate)
             self._train = optimizer.minimize(self._loss)
 
             self.saver = tf.train.Saver({

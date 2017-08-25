@@ -67,10 +67,12 @@ def batch_train(env, mainDQN, targetDQN, train_batch: list) -> float:
     X = states
 
     Q_target = rewards + discount * np.max(targetDQN.predict(next_states), axis=1) * ~done
+    print("Q_target:",Q_target.shape)
     spatial_Q_target = []
     spatial_predict = targetDQN.predictSpatial(next_states)
     for i in range(13):
         spatial_Q_target.append( rewards + discount * np.max(spatial_predict[i], axis=1) *~done )
+    print("sQ_t:",spatial_Q_target.shape)
 
     # y shape : [batch_size, output_size]
     y = mainDQN.predict(states)
@@ -215,5 +217,6 @@ def _main(unused_argv):
             mainDQN.saveWeight()
             print("networks were saved, %d'th game result :"%episode,reward)
 
-argv = FLAGS(sys.argv)
-sys.exit(_main(argv))
+if __name__ == "__main__":
+    argv = FLAGS(sys.argv)
+    sys.exit(_main(argv))

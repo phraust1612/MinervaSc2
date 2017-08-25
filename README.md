@@ -22,7 +22,7 @@ Specify your saving directory. For default, DQN structure will be saved at 'save
 
 so be sure that 'saved/' directory exists or prepare for your own.
 
-To run learning process,
+To run reinforcement learning process,
 
 ```shell
 python3 trainingRL.py (starting episode number) (total episodes)
@@ -30,8 +30,17 @@ python3 trainingRL.py (starting episode number) (total episodes)
 
 For default, starting episode and total number would be 0 and 100
 
+To run supervised learning process with your replays,
+
+```shell
+python3 trainingSL.py
+```
+
+For default option, this will refer ~/StarCraftII/Replays/ for replay files
+
 ## Composition
 
-* trainingRL.py : run main learning loops via DQN.
+* trainingRL.py : run reinforcement learning loops via DQN.
+* trainingSL.py : run supervised learning loops with your replay files.
 * minerva_agent.py : contains an agent class which decides actions for every step.
 * dqn.py : DQN network class, in order to devide target and learning networks.

@@ -22,21 +22,24 @@ Specify your saving directory. For default, DQN structure will be saved at 'save
 
 so be sure that 'saved/' directory exists or prepare for your own.
 
-To run reinforcement learning process,
+### Reinforcement Learning
+
 
 ```shell
-python3 trainingRL.py (starting episode number) (total episodes)
+python3 trainingRL.py --start_episode (##) --num_episodes (##)
 ```
 
 For default, starting episode and total number would be 0 and 100
 
-To run supervised learning process with your replays,
+
+### Supervised Learning (with replays)
 
 ```shell
-python3 trainingSL.py
+python3 trainingSL.py --replay (your replay directory) --repeat (no of repetition)
 ```
 
 For default option, this will refer ~/StarCraftII/Replays/ for replay files
+
 
 ## Composition
 

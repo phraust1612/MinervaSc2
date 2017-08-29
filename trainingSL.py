@@ -28,18 +28,44 @@ from pysc2 import run_configs
 from pysc2.lib import actions as actlib
 from pysc2.lib import stopwatch
 from pysc2.lib import features
-from trainingRL import coordinateToInt
+from pysc2.lib import app
 
 import gflags as flags
 from s2clientprotocol import sc2api_pb2 as sc_pb
 
-output_size = 584
-screen_size = 64
-minimap_size = 64
-learning_rate = 0.001
-
-REPLAY_PATH = os.path.expanduser("~") + "/StarCraftII/Replays/"
+REPLAY_HOME = os.path.expanduser("~") + "/StarCraftII/Replays/"
 FLAGS = flags.FLAGS
+
+output_size = len(actlib.FUNCTIONS)
+flags.DEFINE_string("replay",None,"replay path relative to REPLAY_HOME")
+flags.DEFINE_integer("repeat",1,"number of iteration")
+flags.DEFINE_bool("win_only", True, "learn only for the player who won if this flag is True")
+flags.DEFINE_integer("screen_size", 64, "screen width pixels")
+flags.DEFINE_integer("minimap_size", 64, "minimap width pixels")
+flags.DEFINE_integer("learning_rate", 0.001, "learning rate")
+flags.DEFINE_string("agent_race", "T", "agent race")
+flags.DEFINE_string("map_name","AscensiontoAiur", "map name")
+
+def coordinateToInt(coor, size=64):
+    return coor[0] + size*coor[1]
+
+def raceToCode(race):
+    if race == "R":
+        return sc_pb.Random
+    elif race == "P":
+        return sc_pb.Protoss
+    elif race == "T":
+        return sc_pb.Terran
+    else:
+        return sc_pb.Zerg
+
+def mapNameMatch(name:str):
+    name = name.replace(' ','')
+    name = name.replace('LE','')
+    name = name.replace('TE','')
+    name = name.lower()
+    name2 = FLAGS.map_name.lower()
+    return name == name2
 
 def train(mainDQN, obs, action, action_spec):
     states = [[obs]]
@@ -95,10 +121,10 @@ def run_loop(replay, player_id, mainDQN):
     interface.raw = False
     interface.score = True
     interface.feature_layer.width = 24
-    interface.feature_layer.resolution.x = screen_size
-    interface.feature_layer.resolution.y = screen_size
-    interface.feature_layer.minimap_resolution.x = minimap_size
-    interface.feature_layer.minimap_resolution.y = minimap_size
+    interface.feature_layer.resolution.x = FLAGS.screen_size
+    interface.feature_layer.resolution.y = FLAGS.screen_size
+    interface.feature_layer.minimap_resolution.x = FLAGS.minimap_size
+    interface.feature_layer.minimap_resolution.y = FLAGS.minimap_size
 
     max_episode_steps = 0
 
@@ -111,9 +137,27 @@ def run_loop(replay, player_id, mainDQN):
 
     with run_config.start(full_screen=False) as controller:
         info = controller.replay_info(replay_data)
-        print(" Replay info ".center(60, "-"))
-        print(info)
-        print("-" * 60)
+        infomap = info.map_name
+        inforace = info.player_info[player_id-1].player_info.race_actual
+        inforesult = info.player_info[player_id-1].player_result.result
+        if FLAGS.map_name and not mapNameMatch(infomap):
+            print("map doesn't match, continue...")
+            print("map_name:",FLAGS.map_name,"infomap:",infomap)
+            return
+        if FLAGS.agent_race and raceToCode(FLAGS.agent_race) != inforace:
+            print("agent race doesn't match, continue...")
+            print("agent_race:",raceToCode(FLAGS.agent_race),"inforace:",inforace)
+            return
+        if FLAGS.win_only and not inforesult:
+            print("this player was defeated, continue...")
+            print("result:",inforesult)
+            return
+        else:
+            print("condition's satisfied, training starts :",replay)
+            print("map :",infomap)
+            print("player id :", player_id)
+            print("race :", inforace)
+            print("result :", inforesult)
 
         map_path = info.local_map_path
         if map_path:
@@ -149,25 +193,39 @@ def run_loop(replay, player_id, mainDQN):
         print("Score: ", obs.observation.score.score)
         print("Result: ", obs.player_result)
 
-def _main(unused_argv):
-    init = tf.global_variables_initializer()
-    replay_list = os.listdir(REPLAY_PATH)
+def main(unused_argv):
+    replay_list = []
+    if FLAGS.replay:
+        REPLAY_PATH = REPLAY_HOME + FLAGS.replay
+    else:
+        REPLAY_PATH = REPLAY_HOME
+
+    for root, dirs, files in os.walk(REPLAY_PATH):
+        for subdir in dirs:
+            tmp = os.path.join(root, subdir)
+            if tmp[-10:] == '.SC2Replay':
+                replay_list.append(tmp)
+        for file1 in files:
+            tmp = os.path.join(root, file1)
+            if tmp[-10:] == '.SC2Replay':
+                replay_list.append(tmp)
 
     with tf.Session() as sess:
-        mainDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="main")
-        sess.run(init)
+        mainDQN = dqn.DQN(sess, FLAGS.screen_size, FLAGS.minimap_size, output_size, FLAGS.learning_rate, name="main")
 
-        for replay in replay_list:
-            if replay[-10:] != '.SC2Replay':
-                continue
-            start_time = time.time()
-            run_loop(replay, 1, mainDQN)
-            run_loop(replay, 2, mainDQN)
-            mainDQN.saveWeight()
-            print("networks were updated / replay :",replay)
-            elapsed_time = time.time() - start_time
-            print("Took %.3f seconds... " % (elapsed_time))
+        for iter in range(FLAGS.repeat):
+            for replay in replay_list:
+                start_time = time.time()
+                run_loop(replay, 1, mainDQN)
+                run_loop(replay, 2, mainDQN)
+                mainDQN.saveWeight()
+                print("networks were updated / replay :",replay)
+                elapsed_time = time.time() - start_time
+                print("Took %.3f seconds... " % (elapsed_time))
+
+def _main():
+    argv = FLAGS(sys.argv)
+    app.really_start(main)
 
 if __name__ == "__main__":
-    argv = FLAGS(sys.argv)
-    sys.exit(_main(argv))
+    sys.exit(_main())

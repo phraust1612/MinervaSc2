@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
 from pysc2.env import sc2_env
+from pysc2.lib import actions as actlib
+from pysc2.lib import app
 from collections import deque
 from typing import List
 import random
@@ -13,19 +15,41 @@ import psutil
 import resource
 FLAGS = flags.FLAGS
 
-output_size = 584 # no of possible actions
-screen_size = 64 # no of possible pixel coordinates
-minimap_size = 64
+output_size = len(actlib.FUNCTIONS) # no of possible actions
+flags.DEFINE_integer("start_episode", 0, "starting episode number")
+flags.DEFINE_integer("num_episodes", 100, "total episodes number")
+flags.DEFINE_integer("screen_size", 64, "screen width pixels")
+flags.DEFINE_integer("minimap_size", 64, "minimap width pixels")
 
-learning_rate = 0.001
-discount = 0.99
-batch_size = 16
-max_buffer_size = 50000
-update_frequency = 16
+flags.DEFINE_integer("learning_rate", 0.001, "learning rate")
+flags.DEFINE_integer("discount", 0.99, "discount factor")
+flags.DEFINE_integer("batch_size", 16, "size of mini-batch")
+flags.DEFINE_integer("max_buffer_size", 50000, "maximum deque size")
+flags.DEFINE_integer("update_frequency", 16, "update target frequency")
 
-visualize = False
-myrace = "P"
-botrace = "T"
+flags.DEFINE_bool("visualize", False, "visualize")
+flags.DEFINE_string("agent_race", "T", "agent race")
+flags.DEFINE_string("bot_race", "R", "bot race")
+flags.DEFINE_string("map_name","AscensiontoAiur", "map name")
+flags.DEFINE_string("difficulty","1", "bot difficulty")
+
+# below is a list of possible map_name
+# AbyssalReef
+# Acolyte
+# AscensiontoAiur
+# BelShirVestige
+# BloodBoil
+# CactusValley
+# DefendersLanding
+# Frost
+# Honorgrounds
+# Interloper
+# MechDepot
+# NewkirkPrecinct
+# Odyssey
+# PaladinoTerminal
+# ProximaTerminal
+# Sequencer
 
 def coordinateToInt(coor, size=64):
     return coor[0] + size*coor[1]
@@ -48,7 +72,7 @@ def batch_train(env, mainDQN, targetDQN, train_batch: list) -> float:
     done = np.array([x[5] for x in train_batch])
 
     # actions_arg[i] : arguments whose id=i
-    actions_arg = np.ones([13,batch_size],dtype=np.int32)
+    actions_arg = np.ones([13,FLAGS.batch_size],dtype=np.int32)
     actions_arg *= -1
 
     batch_index = 0
@@ -66,11 +90,11 @@ def batch_train(env, mainDQN, targetDQN, train_batch: list) -> float:
 
     X = states
 
-    Q_target = rewards + discount * np.max(targetDQN.predict(next_states), axis=1) * ~done
+    Q_target = rewards + FLAGS.discount * np.max(targetDQN.predict(next_states), axis=1) * ~done
     spatial_Q_target = []
     spatial_predict = targetDQN.predictSpatial(next_states)
     for i in range(13):
-        spatial_Q_target.append( rewards + discount * np.max(spatial_predict[i], axis=1) *~done )
+        spatial_Q_target.append( rewards + FLAGS.discount * np.max(spatial_predict[i], axis=1) *~done )
 
     # y shape : [batch_size, output_size]
     y = mainDQN.predict(states)
@@ -111,7 +135,7 @@ def get_copy_var_ops(*, dest_scope_name: str, src_scope_name: str) -> List[tf.Op
 # returns pysc2.env.environment.TimeStep after end of the game
 def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
     total_frames = 0
-    stored_buffer = deque(maxlen=max_buffer_size)
+    stored_buffer = deque(maxlen=FLAGS.max_buffer_size)
     start_time = time.time()
 
     action_spec = env.action_spec()
@@ -150,11 +174,11 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
 
             stored_buffer.append( (state, actions[0].function, actions[0].arguments, reward, next_state, done) )
 
-            if len(stored_buffer) > batch_size:
-                minibatch = random.sample(stored_buffer, batch_size)
+            if len(stored_buffer) > FLAGS.batch_size:
+                minibatch = random.sample(stored_buffer, FLAGS.batch_size)
                 loss, _ = batch_train(env, mainDQN, targetDQN, minibatch)
 
-            if step_count % update_frequency == 0:
+            if step_count % FLAGS.update_frequency == 0:
                 sess.run(copy_ops)
 
             state = next_state
@@ -168,35 +192,26 @@ def run_loop(agents, env, sess, e, mainDQN, targetDQN, copy_ops, max_frames=0):
             elapsed_time, total_frames, total_frames / elapsed_time))
     return timesteps
 
-def _main(unused_argv):
-    if len(unused_argv)>1:
-        start_epi = (int)(unused_argv[1])
-    else:
-        start_epi = 0
-    if len(unused_argv)>2:
-        num_episodes = (int)(unused_argv[2])
-    else:
-        num_episodes = 100
-
+def main(unusued_argv):
     parent_proc = psutil.Process()
-    init = tf.global_variables_initializer()
     with tf.Session() as sess:
-        mainDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="main")
-        targetDQN = dqn.DQN(sess, screen_size, minimap_size, output_size, learning_rate, name="target")
-        sess.run(init)
+        mainDQN = dqn.DQN(sess, FLAGS.screen_size, FLAGS.minimap_size, output_size, FLAGS.learning_rate, name="main")
+        targetDQN = dqn.DQN(sess, FLAGS.screen_size, FLAGS.minimap_size, output_size, FLAGS.learning_rate, name="target")
 
         copy_ops = get_copy_var_ops(dest_scope_name="target", src_scope_name="main")
         sess.run(copy_ops)
         print("memory before starting the iteration : %s (kb)"%(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
 
-        for episode in range(start_epi, num_episodes):
+        for episode in range(FLAGS.start_episode, FLAGS.num_episodes):
             e = 1.0 / ((episode / 50) + 2.0) # decaying exploration rate
             with sc2_env.SC2Env(
-                    "Odyssey",
-                    agent_race=myrace,
-                    bot_race=botrace,
-                    difficulty="1",
-                    visualize=visualize) as env:
+                    FLAGS.map_name,
+                    screen_size_px=(FLAGS.screen_size, FLAGS.screen_size),
+                    minimap_size_px=(FLAGS.minimap_size, FLAGS.minimap_size),
+                    agent_race=FLAGS.agent_race,
+                    bot_race=FLAGS.bot_race,
+                    difficulty=FLAGS.difficulty,
+                    visualize=FLAGS.visualize) as env:
 
                 agent = minerva_agent.MinervaAgent(mainDQN)
                 run_result = run_loop([agent], env, sess, e, mainDQN, targetDQN, copy_ops, 5000)
@@ -215,6 +230,9 @@ def _main(unused_argv):
             mainDQN.saveWeight()
             print("networks were saved, %d'th game result :"%episode,reward)
 
-if __name__ == "__main__":
+def _main():
     argv = FLAGS(sys.argv)
-    sys.exit(_main(argv))
+    app.really_start(main)
+
+if __name__ == "__main__":
+    sys.exit(_main())

@@ -28,7 +28,6 @@ class DQN:
         """DQN Network architecture (FullyConv : check out for DeepMind's sc2le paper)
         """
         with tf.variable_scope(self.net_name):
-            self.session.run(tf.global_variables_initializer())
 
             self._X_minimap = tf.placeholder(tf.float32, [None, 7, self.minimap_size, self.minimap_size], name="x_minimap")
             self._X_screen = tf.placeholder(tf.float32, [None, 13, self.screen_size, self.screen_size], name="x_screen")
@@ -165,6 +164,7 @@ class DQN:
             optimizer = tf.train.GradientDescentOptimizer(learning_rate=self.l_rate)
             self._train = optimizer.minimize(self._loss)
 
+            self.session.run(tf.global_variables_initializer())
             self.saver = tf.train.Saver({
                 'W1_minimap':W1_minimap,
                 'W2_minimap':W2_minimap,
